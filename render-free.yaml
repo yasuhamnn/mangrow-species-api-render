@@ -1,0 +1,26 @@
+# Render FREE tier blueprint for Mangrow species FastAPI.
+#
+# Render's FREE plan = always sleep after 15 min idle + 512MB RAM (enough for your EfficientNet-B0 CPU inference).
+#
+# Deploy steps:
+#   1) Upload ai-server/ contents into a Git repo OR zip the ai-server folder
+#   2) On render.com → New → Blueprint or "Web Service" → runtime: Python, plan: FREE
+#      Build: pip install -r requirements.txt
+#      Start: uvicorn main:app --host 0.0.0.0 --port $PORT
+#      Health: /health
+#      Free plan; or just click "Advanced" -> Free
+
+# Recommended: use the FREE plan for initial testing/APK release, upgrade if many users.
+services:
+  - type: web
+    name: mangrow-species-api
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements-free-render.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"

@@ -1,0 +1,112 @@
+{
+  "classes": [
+    {
+      "index": 0,
+      "name": "Aegiceras_Floridum",
+      "db_name": "Aegiceras_Floridum",
+      "scientific_name": "Aegiceras Floridum",
+      "common_name": "Tinduk-Tindukan",
+      "_source_folder": "Aegiceras Floridum (tinduk-tindukan)"
+    },
+    {
+      "index": 1,
+      "name": "Avicennia_Marina",
+      "db_name": "Avicennia_Marina",
+      "scientific_name": "Avicennia Marina",
+      "common_name": "Bungalon",
+      "_source_folder": "Avicennia Marina (bungalon)"
+    },
+    {
+      "index": 2,
+      "name": "Avicennia_Rumphiana",
+      "db_name": "Avicennia_Rumphiana",
+      "scientific_name": "Avicennia Rumphiana",
+      "common_name": "Miapi",
+      "_source_folder": "Avicennia Rumphiana (miapi)"
+    },
+    {
+      "index": 3,
+      "name": "Bruguiera_Cylindrica",
+      "db_name": "Bruguiera_Cylindrica",
+      "scientific_name": "Bruguiera Cylindrica",
+      "common_name": "Pototan",
+      "_source_folder": "Bruguiera Cylindrica (pototan)"
+    },
+    {
+      "index": 4,
+      "name": "Bruguiera_Gymnorrhiza",
+      "db_name": "Bruguiera_Gymnorrhiza",
+      "scientific_name": "Bruguiera Gymnorrhiza",
+      "common_name": "Busain",
+      "_source_folder": "Bruguiera Gymnorrhiza (busain)"
+    },
+    {
+      "index": 5,
+      "name": "Ceriops_Decandra",
+      "db_name": "Ceriops_Decandra",
+      "scientific_name": "Ceriops Decandra",
+      "common_name": "Baras-Baras",
+      "_source_folder": "Ceriops Decandra (baras-baras)"
+    },
+    {
+      "index": 6,
+      "name": "Excoecaria_Agallocha",
+      "db_name": "Excoecaria_Agallocha",
+      "scientific_name": "Excoecaria Agallocha",
+      "common_name": "Buta-Buta Lipata",
+      "_source_folder": "Excoecaria Agallocha (buta-buta lipata)"
+    },
+    {
+      "index": 7,
+      "name": "Lumnitzera_Racemosa",
+      "db_name": "Lumnitzera_Racemosa",
+      "scientific_name": "Lumnitzera Racemosa",
+      "common_name": "Culasi Tabao",
+      "_source_folder": "Lumnitzera Racemosa (culasi tabao)"
+    },
+    {
+      "index": 8,
+      "name": "Rhizophora_Apiculata",
+      "db_name": "Rhizophora_Apiculata",
+      "scientific_name": "Rhizophora Apiculata",
+      "common_name": "Bakhaw Laki",
+      "_source_folder": "Rhizophora Apiculata (bakhaw laki)"
+    },
+    {
+      "index": 9,
+      "name": "Rhizophora_Mucronata",
+      "db_name": "Rhizophora_Mucronata",
+      "scientific_name": "Rhizophora Mucronata",
+      "common_name": "Bakhaw Babae",
+      "_source_folder": "Rhizophora Mucronata (bakhaw babae)"
+    },
+    {
+      "index": 10,
+      "name": "Rhizophora_Stylosa",
+      "db_name": "Rhizophora_Stylosa",
+      "scientific_name": "Rhizophora Stylosa",
+      "common_name": "Bakhaw Bato",
+      "_source_folder": "Rhizophora Stylosa (bakhaw bato)"
+    },
+    {
+      "index": 11,
+      "name": "Sonneratia_Alba",
+      "db_name": "Sonneratia_Alba",
+      "scientific_name": "Sonneratia alba",
+      "common_name": "Sonneratia Alba",
+      "_source_folder": "Sonneratia alba"
+    },
+    {
+      "index": 12,
+      "name": "Xylocarpus_Moluccensis",
+      "db_name": "Xylocarpus_Moluccensis",
+      "scientific_name": "Xylocarpus Moluccensis",
+      "common_name": "Piag-Ao",
+      "_source_folder": "Xylocarpus Moluccensis (piag-ao)"
+    }
+  ],
+  "num_classes": 13,
+  "input_size": 256,
+  "uncertain_threshold": 0.45,
+  "model": "EfficientNet-B0 (timm), trained on Bogo Mangroves Dataset"
+}
