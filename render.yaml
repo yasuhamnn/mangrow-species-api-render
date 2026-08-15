@@ -10,7 +10,6 @@
 #      Health: /health
 #      Free plan; or just click "Advanced" -> Free
 
-# Recommended: use the FREE plan for initial testing/APK release, upgrade if many users.
 services:
   - type: web
     name: mangrow-species-api
@@ -24,3 +23,20 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
+      - key: ROBOFLOW_API_KEY
+        sync: false
+      # Hosted API (classic, works on every Roboflow account/project with a deployed version):
+      #   ROBOFLOW_BASE_URL = https://detect.roboflow.com  (default if unset)
+      # Serverless API (matches inference_sdk InferenceHTTPClient):
+      #   ROBOFLOW_BASE_URL = https://serverless.roboflow.com
+      #   NOTE: requires a Roboflow key authorized for "serverless inference".
+      #         If you get: "This key is not authorized for serverless inference" ->
+      #         delete this env var entirely, or set it to https://detect.roboflow.com
+      - key: ROBOFLOW_BASE_URL
+        value: "https://detect.roboflow.com"
+      - key: ROBOFLOW_HEALTH_MODEL
+        value: "mangrove_species_diseases-tnqrq/1"
+      - key: ROBOFLOW_TIMEOUT_S
+        value: "20.0"
+      - key: ROBOFLOW_UNCERTAIN_CONF
+        value: "0.55"

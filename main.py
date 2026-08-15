@@ -17,11 +17,14 @@ Endpoints:
 
 from __future__ import annotations
 
+import base64
 import io
 import json
+import os
 from pathlib import Path
 from typing import List, Tuple
 
+import httpx
 import numpy as np
 import torch
 import torch.nn as nn
@@ -60,6 +63,129 @@ UNKNOWN_MARGIN_THR = float(labels.get("unknown_margin_threshold", 0.03))
 IN_DISTRIBUTION_MAX_PROB_CONFIDENT = float(labels.get("in_distribution_max_prob_confident", 0.40))
 USE_TTA = True
 TTA_WEIGHTS = [0.50, 0.25, 0.25]  # center > hflip > 1.12x crop
+
+# ----------------------------------------------------------------------
+# Roboflow health/disease inference proxy.
+# The secret API key is stored ONLY on the server, never in the Expo client/APK.
+# ----------------------------------------------------------------------
+ROBOFLOW_API_KEY = os.environ.get("ROBOFLOW_API_KEY", "").strip()
+ROBOFLOW_HEALTH_MODEL = os.environ.get(
+    "ROBOFLOW_HEALTH_MODEL", "mangrove_species_diseases-tnqrq/1"
+).strip()
+ROBOFLOW_BASE_URL = os.environ.get(
+    "ROBOFLOW_BASE_URL", "https://detect.roboflow.com"
+).strip().rstrip("/")
+ROBOFLOW_TIMEOUT_S = float(os.environ.get("ROBOFLOW_TIMEOUT_S", "20.0"))
+# Thresholds for Roboflow result normalization.
+ROBOFLOW_UNCERTAIN_CONF = float(os.environ.get("ROBOFLOW_UNCERTAIN_CONF", "0.55"))
+# Class-name keywords that indicate a disease/stress state (otherwise Healthy).
+# Tuned to the exact public Universe "Mangrove_Species_Diseases" Object Detection model
+# (12 classes: Black_spots, Brown_spots, Dieback-Gall + several mangrove species classes).
+ROBOFLOW_STRESS_KEYWORDS: tuple[str, ...] = (
+    "disease",
+    "sick",
+    "stress",
+    "unhealthy",
+    "blight",
+    "spot",
+    "spots",
+    "rot",
+    "rust",
+    "mildew",
+    "infected",
+    "defect",
+    "damage",
+    "scorch",
+    "scab",
+    "mangrove_canker",
+    "leaf_spot",
+    "dieback",
+    # Exact universe project disease classes:
+    "black_spots",
+    "brown_spots",
+    "dieback-gall",
+    "dieback_gall",
+    "black spots",
+    "brown spots",
+    "dieback gall",
+)
+ROBOFLOW_DISEASE_CLASSES_EXACT: tuple[str, ...] = (
+    # Any class name that equals one of these (case-insensitive) is disease,
+    # regardless of keyword match, so UI stays accurate to the actual 12-class project.
+    "black_spots",
+    "brown_spots",
+    "dieback-gall",
+    "dieback_gall",
+    "black spots",
+    "brown spots",
+    "dieback gall",
+)
+ROBOFLOW_HEALTHY_KEYWORDS: tuple[str, ...] = (
+    "healthy",
+    "normal",
+    "no_disease",
+    "good",
+    "sound",
+)
+# Non-disease classes in the universe project are mangrove species (not the leaf itself
+# being "unhealthy"), so for those we mark them as "neutral" -> UI treats as healthy-ish
+# but still flags "review by LGU" if no explicit healthy class was detected.
+ROBOFLOW_NEUTRAL_CLASSES_EXACT: tuple[str, ...] = (
+    "lumnitzera-littorea",
+    "lumnitzera_littorea",
+    "lumnitzera littorea",
+    "lumnitzera-littorea-flower",
+    "lumnitzera_littorea_flower",
+    "lumnitzera littorea flower",
+    "rhizophora-apiculata",
+    "rhizophora_apiculata",
+    "rhizophora apiculata",
+    "rhizophora-apiculata-propagule",
+    "rhizophora_apiculata_propagule",
+    "rhizophora apiculata propagule",
+    "scyphiphora-hydrophyl lacea",
+    "scyphiphora-hydrophyl lacea-flower",
+    "scyphiphora-hydrophyllacea",
+    "scyphiphora_hydrophyllacea",
+    "scyphiphora hydrophyllacea",
+    "scyphiphora-hydrophyllacea-flower",
+    "scyphiphora_hydrophyllacea_flower",
+    "scyphiphora hydrophyllacea flower",
+    "sonneratia-alba",
+    "sonneratia_alba",
+    "sonneratia alba",
+    "sonneratia alba flower",
+    "sonneratia-alba-flower",
+    "sonneratia_alba_flower",
+    "avicennia-alba",
+    "avicennia_alba",
+    "avicennia alba",
+    "avicennia-marina",
+    "avicennia_marina",
+    "avicennia marina",
+    "rhizophora-mucronata",
+    "rhizophora_mucronata",
+    "rhizophora mucronata",
+    "rhizophora-mucronata-propagule",
+    "bruguiera-sexangula",
+    "bruguiera_sexangula",
+    "bruguiera sexangula",
+    "bruguiera-parviflora",
+    "bruguiera_parviflora",
+    "bruguiera parviflora",
+    "ceriops-tagal",
+    "ceriops_tagal",
+    "ceriops tagal",
+    "acanthus-ilicifolius",
+    "acanthus_ilicifolius",
+    "acanthus ilicifolius",
+    "acrostichum-aureum",
+    "acrostichum_aureum",
+    "acrostichum aureum",
+    "nipah-fruticans",
+    "nipah_fruticans",
+    "nipah fruticans",
+)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -190,20 +316,15 @@ def open_image_rgb(data: bytes) -> Image.Image:
 
 
 def _classify_unknown(probs: np.ndarray) -> dict:
-    """Decide whether an image is out-of-distribution / not one of the 13 trained species.
+    """Species-only (13-class) classifier: ALWAYS treat the top argmax as the answer.
 
-    Conservative rule: we ONLY flag unknown on strong evidence, because a "correct but ~40%
-    confident" in-distribution prediction is common on real-world phone captures and we MUST
-    NOT show the red "not part of 13 species" banner for them.
+    User requested to REMOVE out-of-distribution handling so the UI behaves like the first
+    version: never "Not part of 13 trained mangrove species", never show unknown banners,
+    and always just display the single best-guess species from the 13 trained labels,
+    together with its raw confidence meter.
 
-    Conditions that mark UNKNOWN (any):
-      1. top-1 < UNKNOWN_MAX_PROB_THR AND entropy >= UNKNOWN_ENTROPY_THR AND margin < UNKNOWN_MARGIN_THR
-      2. entropy is EXTREMELY high (normalized >= 0.72), regardless of raw max-prob
-    Conditions that force KNOWN (safe override):
-      A. top-1 >= IN_DISTRIBUTION_MAX_PROB_CONFIDENT, OR
-      B. margin is big (> 0.18), even if entropy is somewhat high
-
-    Returns a dict with flags + diagnostic values for the UI.
+    We still compute diagnostic numbers (entropy / margin etc.) inside the returned dict
+    because they are harmless for future debugging, but `is_unknown` is forced False.
     """
     eps = 1e-12
     p = np.asarray(probs, dtype=np.float64)
@@ -218,32 +339,9 @@ def _classify_unknown(probs: np.ndarray) -> dict:
     entropy = float(-np.sum(p * np.log(p)))
     max_entropy = float(np.log(max(2, len(p))))
     norm_entropy = float(entropy / max_entropy) if max_entropy > 0 else 0.0
-
-    # Known-safe overrides first (most important for your 40%-confident correct IDs)
-    clearly_in_distribution = bool(
-        max_prob >= IN_DISTRIBUTION_MAX_PROB_CONFIDENT or margin >= 0.18
-    )
-
-    flags = {
-        "low_max_prob": bool(max_prob < UNKNOWN_MAX_PROB_THR),
-        "high_entropy": bool(entropy >= UNKNOWN_ENTROPY_THR or norm_entropy >= 0.58),
-        "small_margin": bool(margin < UNKNOWN_MARGIN_THR),
-        "extreme_entropy": bool(norm_entropy >= 0.72),
-    }
-    reasons = []
-    # Unknown triggers
-    if flags["low_max_prob"] and flags["high_entropy"] and flags["small_margin"]:
-        reasons.append("very_low_confidence_spread_across_classes")
-    if flags["extreme_entropy"]:
-        reasons.append("predictions_very_uniform_across_13_classes")
-
-    is_unknown = bool(
-        not clearly_in_distribution
-        and (len(reasons) > 0)
-    )
     return {
-        "is_unknown": is_unknown,
-        "reasons": reasons,
+        "is_unknown": False,
+        "reasons": [],
         "top_1_idx": top_1,
         "top_2_idx": top_2,
         "top_1_confidence": max_prob,
@@ -277,7 +375,287 @@ def health():
         "num_classes": NUM_CLASSES,
         "input_size": IMG_SIZE,
         "tta": USE_TTA,
+        "roboflow": {
+            "configured": bool(ROBOFLOW_API_KEY and ROBOFLOW_HEALTH_MODEL),
+            "model": ROBOFLOW_HEALTH_MODEL or None,
+            "base_url": ROBOFLOW_BASE_URL,
+            "timeout_s": ROBOFLOW_TIMEOUT_S,
+        },
     }
+
+
+# ----------------------------------------------------------------------
+# Roboflow helper functions — keep the response contract JSON-safe.
+# ----------------------------------------------------------------------
+def _image_to_bytes_jpeg(img: Image.Image, max_edge: int = 1280, quality: int = 85) -> bytes:
+    """Resize preserving aspect, JPEG compress, return raw bytes."""
+    w, h = img.size
+    scale = min(1.0, float(max_edge) / float(max(w, h)))
+    if scale < 1.0:
+        new_w, new_h = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
+        img = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=int(quality), optimize=True)
+    return buf.getvalue()
+
+
+def _image_to_roboflow_base64(img: Image.Image, max_edge: int = 1280, quality: int = 85) -> str:
+    """Resize to max_edge preserving aspect, JPEG compress, then return data URI.
+
+    Roboflow's Hosted API (detect.roboflow.com) accepts:
+      1. multipart file upload
+      2. data URI base64 inside JSON body (smaller POSTs for mobile).
+    """
+    raw = _image_to_bytes_jpeg(img, max_edge=max_edge, quality=quality)
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:image/jpeg;base64,{b64}"
+
+
+def _parse_roboflow_class(raw: str) -> str:
+    return (raw or "").strip().replace("_", " ")
+
+
+def _severity_for_class(name: str) -> str | None:
+    """Return mild / moderate / severe based on keywords in class names.
+
+    If your Roboflow classes are named like:
+      - Healthy / Normal / No Disease → severity = None (healthy case)
+      - Leaf Spot Mild / Anthracnose Mild → mild
+      - Leaf Spot Moderate → moderate
+      - Severe Blight / Dieback Severe → severe
+    we map automatically. Otherwise, severity = None and UI leaves it off.
+    """
+    n = name.lower()
+    if any(k in n for k in ("severe", "critical", "advanced", "heavy")):
+        return "severe"
+    if any(k in n for k in ("moderate", "mid", "medium")):
+        return "moderate"
+    if any(k in n for k in ("mild", "early", "light", "slight", "minor", "low")):
+        return "mild"
+    return None
+
+
+def _roboflow_is_healthy(class_name: str) -> bool:
+    """Return True when the Roboflow class is explicitly "healthy" or a neutral species/propagule class.
+
+    Universe project "Mangrove_Species_Diseases" has mixed classes:
+      - Stress classes: black_spots, brown_spots, dieback-gall  => _is_healthy = False
+      - Neutral classes (mangrove species / flowers / propagules detected on the leaf)
+          => treated as "not stressed" => _is_healthy = True
+      - Explicit Healthy/Normal classes: True
+      - Anything unrecognized => False (flag for LGU review)
+    """
+    n = (class_name or "").strip().lower()
+    if not n:
+        return False
+    if n in {c.lower() for c in ROBOFLOW_DISEASE_CLASSES_EXACT}:
+        return False
+    if n in {c.lower() for c in ROBOFLOW_NEUTRAL_CLASSES_EXACT}:
+        return True
+    if any(k in n for k in ROBOFLOW_DISEASE_CLASSES_EXACT):
+        # Ex: "black_spots_early", "dieback-gall_severe" — still disease
+        return False
+    if any(k in n for k in ROBOFLOW_HEALTHY_KEYWORDS):
+        return True
+    if any(k in n for k in ROBOFLOW_STRESS_KEYWORDS):
+        return False
+    # Undetermined: treat as unhealthy so UI flags for LGU review.
+    return False
+
+
+def _roboflow_is_serverless(base_url: str) -> bool:
+    """Decide Roboflow upload style based on env base URL.
+
+    serverless.roboflow.com uses multipart file POST (consistent with inference_sdk InferenceHTTPClient.infer).
+    detect.roboflow.com   uses data-uri JSON body upload with api_key query param.
+    """
+    return "serverless.roboflow.com" in (base_url or "").lower()
+
+
+def _normalize_roboflow_response(payload: dict) -> dict:
+    """Take Roboflow JSON (Hosted API or Serverless API) and return Mangrow-standard shape.
+
+    Normalizes all of these inputs into one stable shape:
+      1. Object-Detection project:
+          {"predictions": [ {"class": "...", "confidence": 0.xx, "x":.., "y":.., "width":.., "height":..} ] }
+      2. Classification project (Hosted API):
+          {"predicted_classes": [...], "predictions": { "<class>": <conf>, ... }, "top": "<class>", "confidence": 0.xx }
+      3. Classification project (Serverless API / inference_sdk):
+          {"predictions": [ {"class": "<class>", "class_id":..., "confidence": 0.xx}, ... ], ... }
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(502, "Roboflow returned a non-JSON response.")
+
+    # ----- Variant A: Hosted Classification: predictions is a MAP of {class: conf} -----
+    if isinstance(payload.get("predictions"), dict) and (payload.get("top") or payload.get("predicted_classes")):
+        raw_cls_map = payload["predictions"]
+        items = sorted(
+            ({"class": str(cls), "confidence": float(conf)} for cls, conf in raw_cls_map.items()),
+            key=lambda r: -r["confidence"],
+        )[:5]
+    elif isinstance(payload.get("predictions"), list):
+        # ----- Variant B / C: list of predictions (either Object-Detection bboxes, or Serverless Classification list) -----
+        raw_list: list = payload["predictions"]
+        is_classification_list = bool(raw_list) and all(
+            isinstance(x, dict) and "class" in x and "confidence" in x and "x" not in x
+            for x in raw_list[:3]
+        )
+        if is_classification_list:
+            # Serverless-style classification list: [{class, class_id, confidence}]
+            best_by_cls: dict[str, dict] = {}
+            for d in raw_list:
+                if not isinstance(d, dict):
+                    continue
+                cls_raw = _parse_roboflow_class(str(d.get("class", "")))
+                if not cls_raw:
+                    continue
+                conf = float(d.get("confidence") or 0.0)
+                prev = best_by_cls.get(cls_raw)
+                if prev is None or conf > float(prev["confidence"]):
+                    best_by_cls[cls_raw] = {"class": cls_raw, "confidence": conf}
+            items = sorted(best_by_cls.values(), key=lambda r: -float(r["confidence"]))[:5]
+        else:
+            # Object-Detection list: dedupe per class keeping max conf, keep bbox.
+            best_by_cls = {}
+            for d in raw_list:
+                if not isinstance(d, dict):
+                    continue
+                cls_raw = _parse_roboflow_class(str(d.get("class", "")))
+                if not cls_raw:
+                    continue
+                conf = float(d.get("confidence") or 0.0)
+                prev = best_by_cls.get(cls_raw)
+                if prev is None or conf > float(prev["confidence"]):
+                    best_by_cls[cls_raw] = {
+                        "class": cls_raw,
+                        "confidence": conf,
+                        "bbox": {
+                            "x": float(d.get("x") or 0.0),
+                            "y": float(d.get("y") or 0.0),
+                            "width": float(d.get("width") or 0.0),
+                            "height": float(d.get("height") or 0.0),
+                        }
+                        if all(k in d for k in ("x", "y", "width", "height"))
+                        else None,
+                    }
+            items = sorted(best_by_cls.values(), key=lambda r: -float(r["confidence"]))[:5]
+    else:
+        items = []
+
+    if not items:
+        # No detections / no classes → UI shows uncertain.
+        predictions = []
+        top_health = None
+        is_healthy = False
+        uncertain = True
+    else:
+        top = items[0]
+        top_name = top["class"]
+        top_conf = float(top["confidence"])
+        is_healthy = _roboflow_is_healthy(top_name)
+        uncertain = bool(top_conf < ROBOFLOW_UNCERTAIN_CONF)
+        predictions = [
+            {
+                "class_name": it["class"],
+                "display_name": it["class"].replace("_", " ").replace("-", " ").title(),
+                "confidence": float(it["confidence"]),
+                "severity": _severity_for_class(it["class"]),
+                "is_healthy": _roboflow_is_healthy(it["class"]),
+                **({"bbox": it["bbox"]} if it.get("bbox") is not None else {}),
+            }
+            for it in items
+        ]
+        top_health = {
+            "status": "healthy" if is_healthy else "unhealthy",
+            "label": "Normal" if is_healthy else "Shows Stress",
+            "description": None,
+            "driving_class": predictions[0]["display_name"],
+            "confidence": predictions[0]["confidence"],
+        }
+
+    return {
+        "predictions": predictions,
+        "uncertain": uncertain,
+        "top_health": top_health,
+        "raw": payload,  # Pass back raw for debugging.
+    }
+
+
+@app.post("/health-predict")
+async def health_predict(image: UploadFile = File(...)):
+    """Proxy the uploaded leaf image to Roboflow (Hosted or Serverless) and return Mangrow-standard JSON.
+
+    Security: the Roboflow secret API key is never exposed to the Expo app.
+    This endpoint accepts the same multipart `image` field as /predict.
+
+    Upload strategy (auto-detected based on ROBOFLOW_BASE_URL):
+      - serverless.roboflow.com -> multipart file POST (like inference_sdk InferenceHTTPClient.infer)
+      - detect.roboflow.com     -> data-uri JSON body (smaller POST, avoids 413 for phone photos)
+    """
+    if not ROBOFLOW_API_KEY or not ROBOFLOW_HEALTH_MODEL:
+        raise HTTPException(
+            503,
+            "Roboflow health AI is not configured on this server. "
+            "Set ROBOFLOW_API_KEY + ROBOFLOW_HEALTH_MODEL environment variables.",
+        )
+
+    if not image.content_type or not image.content_type.startswith("image/"):
+        raise HTTPException(400, "Send an image multipart field named 'image'")
+
+    data = await image.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    try:
+        img = open_image_rgb(data)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid image: {e}") from e
+
+    use_serverless = _roboflow_is_serverless(ROBOFLOW_BASE_URL)
+
+    if use_serverless:
+        # Match inference_sdk style: multipart file POST to serverless.roboflow.com/<model_id>?api_key=...
+        jpeg_bytes = _image_to_bytes_jpeg(img, max_edge=1280, quality=85)
+        url = f"{ROBOFLOW_BASE_URL}/{ROBOFLOW_HEALTH_MODEL}"
+        params = {"api_key": ROBOFLOW_API_KEY}
+        files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
+        try:
+            async with httpx.AsyncClient(timeout=ROBOFLOW_TIMEOUT_S) as client:
+                resp = await client.post(url, params=params, files=files)
+        except httpx.TimeoutException as e:
+            raise HTTPException(504, f"Roboflow request timed out after {ROBOFLOW_TIMEOUT_S}s.") from e
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Roboflow network error: {e}") from e
+    else:
+        # detect.roboflow.com -> data-uri JSON body with api_key query param
+        try:
+            data_uri = _image_to_roboflow_base64(img, max_edge=1280, quality=85)
+        except Exception as e:
+            raise HTTPException(500, f"Failed to encode image for Roboflow: {e}") from e
+        url = f"{ROBOFLOW_BASE_URL}/{ROBOFLOW_HEALTH_MODEL}"
+        params = {"api_key": ROBOFLOW_API_KEY}
+        body = {"image": data_uri}
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        try:
+            async with httpx.AsyncClient(timeout=ROBOFLOW_TIMEOUT_S) as client:
+                resp = await client.post(url, params=params, json=body, headers=headers)
+        except httpx.TimeoutException as e:
+            raise HTTPException(504, f"Roboflow request timed out after {ROBOFLOW_TIMEOUT_S}s.") from e
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Roboflow network error: {e}") from e
+
+    try:
+        payload = resp.json()
+    except Exception as e:
+        raise HTTPException(502, f"Roboflow returned invalid JSON (HTTP {resp.status}).") from e
+
+    if resp.status_code >= 400:
+        raise HTTPException(
+            resp.status_code,
+            f"Roboflow error: {payload.get('message') or payload.get('error') or f'HTTP {resp.status}'}",
+        )
+
+    normalized = _normalize_roboflow_response(payload)
+    return normalized
 
 
 @app.post("/predict")
