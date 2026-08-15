@@ -100,24 +100,28 @@ ROBOFLOW_STRESS_KEYWORDS: tuple[str, ...] = (
     "mangrove_canker",
     "leaf_spot",
     "dieback",
-    # Exact universe project disease classes:
+    # Exact project disease classes (forked dataset is now 3 classes):
     "black_spots",
     "brown_spots",
+    "white_spots",
     "dieback-gall",
     "dieback_gall",
     "black spots",
     "brown spots",
+    "white spots",
     "dieback gall",
 )
 ROBOFLOW_DISEASE_CLASSES_EXACT: tuple[str, ...] = (
     # Any class name that equals one of these (case-insensitive) is disease,
-    # regardless of keyword match, so UI stays accurate to the actual 12-class project.
+    # regardless of keyword match, so UI stays accurate to the actual project classes.
     "black_spots",
     "brown_spots",
+    "white_spots",
     "dieback-gall",
     "dieback_gall",
     "black spots",
     "brown spots",
+    "white spots",
     "dieback gall",
 )
 ROBOFLOW_HEALTHY_KEYWORDS: tuple[str, ...] = (
