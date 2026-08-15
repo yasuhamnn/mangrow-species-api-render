@@ -2,7 +2,7 @@
 # Docs: https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: mangrow-species-api-render-1
+    name: mangrow-species-api-v2
     runtime: python
     plan: free
     region: singapore
