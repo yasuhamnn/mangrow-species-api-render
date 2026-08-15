@@ -1,42 +1,24 @@
-# Render FREE tier blueprint for Mangrow species FastAPI.
-#
-# Render's FREE plan = always sleep after 15 min idle + 512MB RAM (enough for your EfficientNet-B0 CPU inference).
-#
-# Deploy steps:
-#   1) Upload ai-server/ contents into a Git repo OR zip the ai-server folder
-#   2) On render.com → New → Blueprint or "Web Service" → runtime: Python, plan: FREE
-#      Build: pip install -r requirements.txt
-#      Start: uvicorn main:app --host 0.0.0.0 --port $PORT
-#      Health: /health
-#      Free plan; or just click "Advanced" -> Free
-
+# Render Blueprint for Mangrow Species + Health API
+# Docs: https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: mangrow-species-api
+    name: mangrow-species-api-render-1
     runtime: python
     plan: free
     region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 75
     healthCheckPath: /health
-    numInstances: 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
-      - key: ROBOFLOW_API_KEY
-        sync: false
-      # Hosted API (classic, works on every Roboflow account/project with a deployed version):
-      #   ROBOFLOW_BASE_URL = https://detect.roboflow.com  (default if unset)
-      # Serverless API (matches inference_sdk InferenceHTTPClient):
-      #   ROBOFLOW_BASE_URL = https://serverless.roboflow.com
-      #   NOTE: requires a Roboflow key authorized for "serverless inference".
-      #         If you get: "This key is not authorized for serverless inference" ->
-      #         delete this env var entirely, or set it to https://detect.roboflow.com
       - key: ROBOFLOW_BASE_URL
-        value: "https://detect.roboflow.com"
+        value: "https://serverless.roboflow.com"
       - key: ROBOFLOW_HEALTH_MODEL
-        value: "mangrove_species_diseases-tnqrq/1"
+        value: "crmc-rosejane-mahusay/mangrove_species_diseases-tnqrq-dd8ac-3-yolo11n-t1"
       - key: ROBOFLOW_TIMEOUT_S
-        value: "20.0"
+        value: "20"
       - key: ROBOFLOW_UNCERTAIN_CONF
         value: "0.55"
+      - key: ROBOFLOW_API_KEY
+        sync: false
